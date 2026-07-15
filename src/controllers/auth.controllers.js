@@ -6,6 +6,12 @@ import jwt from "jsonwebtoken";
 const register = async (req, res) => {
   const { username, email, password } = req.body;
 
+  if (!username || !email || !password) {
+    return res.status(400).json({
+      message: "Bad request.",
+    });
+  }
+
   const UserAlreadyExists = await userModel.findOne({
     $or: [{ username }, { email }],
   });
@@ -30,7 +36,7 @@ const register = async (req, res) => {
     {
       id: user._id,
     },
-    process.env.REFRESH_JWT_TOKEN,
+    process.env.REFRESH_JWT_SECRET,
     {
       expiresIn: "7d",
     },
@@ -52,7 +58,7 @@ const register = async (req, res) => {
       id: user._id,
       sessionId: session._id,
     },
-    process.env.ACCESS_JWT_TOKEN,
+    process.env.ACCESS_JWT_SECRET,
     {
       expiresIn: "10m",
     },
@@ -76,6 +82,12 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   const { username, email, password } = req.body;
+
+  if (username || email || !password) {
+    return res.status(400).json({
+      message: "Bad request.",
+    });
+  }
 
   const user = await userModel.findOne({
     $or: [{ username }, { email }],
@@ -108,7 +120,7 @@ const login = async (req, res) => {
     {
       id: user._id,
     },
-    process.env.REFRESH_JWT_TOKEN,
+    process.env.REFRESH_JWT_SECRET,
     {
       expiresIn: "7d",
     },
@@ -130,7 +142,7 @@ const login = async (req, res) => {
       id: user._id,
       sessionId: session._id,
     },
-    process.env.ACCESS_JWT_TOKEN,
+    process.env.ACCESS_JWT_SECRET,
     {
       expiresIn: "10m",
     },
@@ -161,7 +173,16 @@ const rotateToken = async (req, res) => {
     });
   }
 
-  const decoded = await jwt.verify(refreshToken, process.env.REFRESH_JWT_TOKEN);
+  try {
+    const decoded = await jwt.verify(
+      refreshToken,
+      process.env.REFRESH_JWT_SECRET,
+    );
+  } catch (err) {
+    return res
+      .status(401)
+      .json({ message: "Invalid or expired refresh token." });
+  }
   const session = await sessionModel.findOne({
     refreshToken: crypto
       .createHash("sha256")
@@ -179,7 +200,7 @@ const rotateToken = async (req, res) => {
     {
       id: decoded.id,
     },
-    process.env.ACCESS_JWT_TOKEN,
+    process.env.ACCESS_JWT_SECRET,
     {
       expiresIn: "10m",
     },
@@ -189,14 +210,14 @@ const rotateToken = async (req, res) => {
     {
       id: decoded.id,
     },
-    process.env.REFRESH_JWT_TOKEN,
+    process.env.REFRESH_JWT_SECRET,
     {
       expiresIn: "7d",
     },
   );
   const hashNewRefreshToken = await crypto
     .createHash("sha256")
-    .update(refreshToken)
+    .update(newRefreshToken)
     .digest("hex");
   session.refreshToken = hashNewRefreshToken;
   await session.save();
@@ -222,10 +243,16 @@ const logout = async (req, res) => {
     });
   }
 
-  const decoded = await jwt.verify(
-    refreshToken,
-    process.env.REFRESH_JWT_SECRET,
-  );
+  try {
+    const decoded = await jwt.verify(
+      refreshToken,
+      process.env.REFRESH_JWT_SECRET,
+    );
+  } catch (err) {
+    return res
+      .status(401)
+      .json({ message: "Invalid or expired refresh token." });
+  }
   const session = await sessionModel.findOne({
     refreshToken: crypto
       .createHash("sha256")
@@ -257,10 +284,16 @@ const logoutall = async (req, res) => {
     });
   }
 
-  const decoded = await jwt.verify(
-    refreshToken,
-    process.env.REFRESH_JWT_SECRET,
-  );
+  try {
+    const decoded = await jwt.verify(
+      refreshToken,
+      process.env.REFRESH_JWT_SECRET,
+    );
+  } catch (err) {
+    return res
+      .status(401)
+      .json({ message: "Invalid or expired refresh token." });
+  }
   const session = await sessionModel.updateMany(
     {
       refreshToken: crypto
