@@ -1,6 +1,6 @@
 import userModel from "../models/user.model.js";
 import sessionModel from "../models/session.model.js";
-import bcrypt from "bcrypt";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
 const register = async (req, res) => {
@@ -15,7 +15,10 @@ const register = async (req, res) => {
     });
   }
 
-  const hashPassword = await bcrypt.hash(password, 10);
+  const hashPassword = await crypto
+    .createHash("sha256")
+    .update(password)
+    .digest("hex");
 
   const user = await userModel.create({
     username,
@@ -27,12 +30,15 @@ const register = async (req, res) => {
     {
       id: user._id,
     },
-    process.env.JWT_SECRET,
+    process.env.REFRESH_JWT_TOKEN,
     {
       expiresIn: "7d",
     },
   );
-  const hashRefreshToken = await bcrypt.hash(refreshToken, 10);
+  const hashRefreshToken = await crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
 
   const session = await sessionModel.create({
     user,
@@ -46,7 +52,7 @@ const register = async (req, res) => {
       id: user._id,
       sessionId: session._id,
     },
-    process.env.JWT_SECRET,
+    process.env.ACCESS_JWT_TOKEN,
     {
       expiresIn: "10m",
     },
@@ -80,9 +86,20 @@ const login = async (req, res) => {
     });
   }
 
-  const isPasswordValid = await bcrypt.compare(password, user.password);
+  const hashPassword = crypto
+    .createHash("sha256")
+    .update(password)
+    .digest("hex");
+  const bufferA = Buffer.from(hashPassword, "hex");
+  const bufferB = Buffer.from(user.password, "hex");
+  if (bufferA.length !== bufferB.length) {
+    return res.status(401).json({
+      message: "Invalid credentials.",
+    });
+  }
+  const isPasswordValid = crypto.timingSafeEqual(bufferA, bufferB);
   if (!isPasswordValid) {
-    return res.status(201).json({
+    return res.status(401).json({
       message: "Invalid credentials.",
     });
   }
@@ -91,12 +108,15 @@ const login = async (req, res) => {
     {
       id: user._id,
     },
-    process.env.JWT_SECRET,
+    process.env.REFRESH_JWT_TOKEN,
     {
       expiresIn: "7d",
     },
   );
-  const hashRefreshToken = await bcrypt.hash(refreshToken, 10);
+  const hashRefreshToken = await crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
 
   const session = await sessionModel.create({
     user,
@@ -110,7 +130,7 @@ const login = async (req, res) => {
       id: user._id,
       sessionId: session._id,
     },
-    process.env.JWT_SECRET,
+    process.env.ACCESS_JWT_TOKEN,
     {
       expiresIn: "10m",
     },
@@ -123,7 +143,7 @@ const login = async (req, res) => {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
   res.status(201).json({
-    message: "User created successfully.",
+    message: "Logged in successfully.",
     user: {
       username: user.username,
       email: user.email,
@@ -141,9 +161,12 @@ const rotateToken = async (req, res) => {
     });
   }
 
-  const decoded = await jwt.verify(refreshToken, process.env.JWT_SECRET);
+  const decoded = await jwt.verify(refreshToken, process.env.REFRESH_JWT_TOKEN);
   const session = await sessionModel.findOne({
-    user: decoded.id,
+    refreshToken: crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex"),
     revoked: false,
   });
   if (!session) {
@@ -156,7 +179,7 @@ const rotateToken = async (req, res) => {
     {
       id: decoded.id,
     },
-    process.env.JWT_SECRET,
+    process.env.ACCESS_JWT_TOKEN,
     {
       expiresIn: "10m",
     },
@@ -166,12 +189,15 @@ const rotateToken = async (req, res) => {
     {
       id: decoded.id,
     },
-    process.env.JWT_SECRET,
+    process.env.REFRESH_JWT_TOKEN,
     {
       expiresIn: "7d",
     },
   );
-  const hashNewRefreshToken = await bcrypt.hash(newRefreshToken, 10);
+  const hashNewRefreshToken = await crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
   session.refreshToken = hashNewRefreshToken;
   await session.save();
 
@@ -196,9 +222,15 @@ const logout = async (req, res) => {
     });
   }
 
-  const decoded = await jwt.verify(refreshToken, process.env.JWT_SECRET);
+  const decoded = await jwt.verify(
+    refreshToken,
+    process.env.REFRESH_JWT_SECRET,
+  );
   const session = await sessionModel.findOne({
-    user: decoded.id,
+    refreshToken: crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex"),
     revoked: false,
   });
   if (!session) {
@@ -225,16 +257,27 @@ const logoutall = async (req, res) => {
     });
   }
 
-  const decoded = await jwt.verify(refreshToken, process.env.JWT_SECRET);
+  const decoded = await jwt.verify(
+    refreshToken,
+    process.env.REFRESH_JWT_SECRET,
+  );
   const session = await sessionModel.updateMany(
     {
-      user: decoded.id,
+      refreshToken: crypto
+        .createHash("sha256")
+        .update(refreshToken)
+        .digest("hex"),
       revoked: false,
     },
     {
       revoked: true,
     },
   );
+  if (!session) {
+    return res.status(401).json({
+      message: "Invalid refresh token.",
+    });
+  }
 
   res.clearCookie("refreshToken");
   res.status(200).json({
